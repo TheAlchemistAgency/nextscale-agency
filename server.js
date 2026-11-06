@@ -16,6 +16,7 @@ const { analyzeStore } = require('./src/analyze');
 const auth = require('./src/auth');
 const { renderReport } = require('./src/render/report');
 const store = require('./src/store');
+const limits = require('./src/limits');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,9 +39,16 @@ app.use(express.static(PUBLIC_DIR, { maxAge: '1h' }));
 
 const inFlight = new Map(); // same URL requested twice at once = one scan
 
-app.post('/api/analyze', async (req, res) => {
+app.post('/api/analyze', limits.rateLimit, async (req, res) => {
   const input = typeof (req.body || {}).url === 'string' ? req.body.url.trim() : '';
   if (!input) return res.status(400).json({ error: 'Enter a store URL to analyze.' });
+
+  // a scan of the same store within the cache window reuses the recent report
+  const cached = limits.cacheGet(input);
+  if (cached) {
+    res.set('x-scan-cache', 'hit');
+    return res.json(cached);
+  }
 
   const key = input.toLowerCase();
   try {
@@ -48,6 +56,7 @@ app.post('/api/analyze', async (req, res) => {
     if (!job) {
       job = analyzeStore(input).then((report) => {
         store.save(report);
+        limits.cacheSet(input, report);
         return report;
       });
       inFlight.set(key, job);
@@ -126,7 +135,14 @@ app.get('/api/image', async (req, res) => {
 /* misc                                                               */
 /* ------------------------------------------------------------------ */
 
-app.get('/api/health', (req, res) => res.json({ ok: true, uptime: Math.round(process.uptime()) }));
+app.get('/api/health', (req, res) =>
+  res.json({
+    ok: true,
+    uptime: Math.round(process.uptime()),
+    teamGate: auth.isEnabled(),
+    cachedScans: limits.cacheSize(),
+  })
+);
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
