@@ -1,0 +1,24 @@
+# Render blueprint — connect the repo and Render reads this automatically.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: nextscale-agency
+    runtime: node
+    plan: starter          # free plan works too, but a disk needs a paid plan
+    buildCommand: npm ci --omit=dev || npm install --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: TEAM_PASSWORD
+        sync: false        # set this in the Render dashboard — never commit it
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: nextscale-data
+      mountPath: /var/data
+      sizeGB: 1
